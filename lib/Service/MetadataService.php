@@ -604,7 +604,10 @@ class MetadataService {
         }
 
         if ($v = $this->getVal('MaxApertureValue', $exif)) {
-            $this->addVal($this->t('Max aperture'), $this->apexToF($this->evalRational($v)), $return);
+            $maxAperture = $this->evalRational($v);
+            if ($maxAperture !== null) {
+                $this->addVal($this->t('Max aperture'), $this->apexToF($maxAperture), $return);
+            }
         }
 
         if ($v = $this->getVal('MeteringMode', $exif)) {
@@ -751,6 +754,9 @@ class MetadataService {
     }
 
     protected function apexToF($val) {
+        if ($val === null) {
+            return null;
+        }
         return 'f/' . sprintf('%01.1f', round(pow(2, $val / 2), 1));
     }
 
@@ -866,7 +872,8 @@ class MetadataService {
             $return = array();
 
             foreach ($coord as $c) {
-                $return[] = strncmp($c, '0/', 2) ? $this->evalRational($c) : 0;
+                $rat = strncmp($c, '0/', 2) ? $this->evalRational($c) : 0;
+                $return[] = ($rat !== null) ? $rat : 0;
             }
         }
 
@@ -928,14 +935,28 @@ class MetadataService {
     }
 
     protected function formatRational($val, $fracIfSmall = false, $precision = 2) {
-        if (preg_match('/([\-]?)(\d+)([\/])(\d+)/', $val, $matches) !== false) {
-            if ($fracIfSmall && ($matches[2] < $matches[4]) && ($matches[2] !== '0')) {
-                if ($matches[2] !== '1') {
-                    $val = $matches[1] . 1 . '/' . round($matches[4] / $matches[2]);
-                }
+        if (is_array($val) && count($val) >= 2) {
+            $matches = array('', '', (string)$val[0], '/', (string)$val[1]);
+        } else if (is_string($val) && preg_match('/([\-]?)(\d+)([\/])(\d+)/', $val, $m)) {
+            $matches = $m;
+        } else {
+            return $val;
+        }
 
-            } else if ($matches[4] !== '0') {
-                $val = round($this->evalFraction($matches[1], $matches[2], $matches[4]), $precision);
+        if ((int)$matches[4] === 0) {
+            return is_string($val) ? $val : null;
+        }
+
+        if ($fracIfSmall && ((int)$matches[2] < (int)$matches[4]) && ($matches[2] !== '0')) {
+            if ($matches[2] !== '1') {
+                $val = $matches[1] . '1/' . round((float)$matches[4] / (float)$matches[2]);
+            } else {
+                $val = $matches[1] . '1/' . $matches[4];
+            }
+        } else {
+            $frac = $this->evalFraction($matches[1], $matches[2], $matches[4]);
+            if ($frac !== null) {
+                $val = round($frac, $precision);
             }
         }
 
@@ -943,7 +964,16 @@ class MetadataService {
     }
 
     protected function evalRational($val) {
-        if (preg_match('/([\-]?)(\d+)([\/])(\d+)/', $val, $matches) !== false) {
+        if (is_array($val) && count($val) >= 2) {
+            if ((int)$val[1] === 0) {
+                return null;
+            }
+            return $this->evalFraction('', $val[0], $val[1]);
+        }
+        if (is_string($val) && preg_match('/([\-]?)(\d+)([\/])(\d+)/', $val, $matches)) {
+            if ((int)$matches[4] === 0) {
+                return null;
+            }
             $val = $this->evalFraction($matches[1], $matches[2], $matches[4]);
         }
 
@@ -951,6 +981,9 @@ class MetadataService {
     }
 
     protected function evalFraction($sig, $num, $den) {
+        if ((float)$den == 0.0) {
+            return null;
+        }
         $val = $num / $den;
         if ($sig === '-') {
             $val = -$val;
